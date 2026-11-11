@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { calculate } from "./api"
 import { type Compute, type Key, type TapeEntry, displayValue, formatNumber, initialState, press } from "./calculator"
 
-type KeySpec = { key: Key; label: string; name?: string; shortcut: string; kind?: "fn" | "op" | "eq" | "wide" }
+type Kind = "digit" | "fn" | "op" | "eq" | "wide"
+type KeySpec = { key: Key; label: string; name?: string; shortcut: string; kind?: Kind }
 
 // Layout order of the 4-column keypad; "=" spans two rows and "0" two columns.
 const KEYS: KeySpec[] = [
@@ -39,6 +40,19 @@ const KEYBOARD: Record<string, Key> = {
   Delete: "clear",
 }
 
+// One complete style per kind: Tailwind resolves conflicting classes by CSS
+// order, not class order, so kinds don't override a shared base.
+const KEY_BASE =
+  "cursor-pointer font-mono leading-none transition-colors duration-100 ease-out focus-visible:outline-2 focus-visible:-outline-offset-4"
+const ON_PAPER = "bg-paper text-ink hover:bg-shade-hover active:bg-shade-down focus-visible:outline-ink"
+const KEY_STYLE: Record<Kind, string> = {
+  digit: `${ON_PAPER} text-digit`,
+  wide: `${ON_PAPER} text-digit col-span-2`,
+  op: `${ON_PAPER} text-glyph`,
+  fn: "bg-shade text-ink text-label hover:bg-shade-hover active:bg-shade-down focus-visible:outline-ink",
+  eq: "row-span-2 bg-ink text-paper text-glyph hover:bg-ink-hover active:bg-ink-hover focus-visible:outline-paper",
+}
+
 export default function App({ compute = calculate }: { compute?: Compute }) {
   const [state, setState] = useState(initialState)
   const [tape, setTape] = useState<TapeEntry[]>([])
@@ -66,7 +80,7 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
       const key = KEYBOARD[e.key]
       if (!key || e.ctrlKey || e.metaKey || e.altKey) return
       // Leave other buttons (like "Clear tape") to their native Enter behaviour.
-      if (e.target instanceof Element && e.target.closest("button:not(.key)")) return
+      if (e.target instanceof Element && e.target.closest("button:not([data-key])")) return
       e.preventDefault() // also stops Enter from re-pressing a focused key
       handle(key)
     }
@@ -75,27 +89,30 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
   }, [handle])
 
   const value = state.error ?? displayValue(state)
-  const valueClass = state.error ? "value error" : value.length > 14 ? "value long" : "value"
+  const valueStyle = state.error
+    ? "block pt-3 font-sans text-lg/[1.3] text-red first-letter:uppercase"
+    : `flex items-end justify-end tracking-tight wrap-anywhere ${value.length > 14 ? "text-display-long" : "text-display"}`
 
   return (
-    <main className="sheet">
-      <h1 className="visually-hidden">Calculator</h1>
+    <main className="grid grid-cols-1 overflow-hidden rounded-sm border border-rule bg-paper sm:grid-cols-[22rem_17rem]">
+      <h1 className="sr-only">Calculator</h1>
 
-      <section className="calculator" aria-label="Calculator">
-        <div className="display">
-          <div className="line" data-testid="line">
+      <section className="border-b border-rule sm:border-r sm:border-b-0" aria-label="Calculator">
+        <div className="px-5 pt-6 pb-4 text-right font-mono tabular-nums">
+          <div className="min-h-5 truncate text-sm/5 text-ink-soft" data-testid="line">
             {state.line}
           </div>
-          <output className={valueClass} data-testid="value">
+          <output className={`min-h-14 ${valueStyle}`} data-testid="value">
             {value}
           </output>
         </div>
-        <div className="keypad">
+        <div className="grid auto-rows-[3.5rem] grid-cols-4 gap-px border-t border-rule bg-rule sm:auto-rows-[3.75rem]">
           {KEYS.map((k) => (
             <button
               key={k.key}
               type="button"
-              className={k.kind ? `key ${k.kind}` : "key"}
+              data-key
+              className={`${KEY_BASE} ${KEY_STYLE[k.kind ?? "digit"]}`}
               aria-label={k.name}
               aria-keyshortcuts={k.shortcut}
               title={k.name && `${k.name} (${k.shortcut})`}
@@ -107,24 +124,38 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
         </div>
       </section>
 
-      <section className="tape" aria-labelledby="tape-title">
-        <header>
-          <h2 id="tape-title">Tape</h2>
+      {/* On desktop the calculator sets the sheet's height (contain: size) and the tape scrolls within it. */}
+      <section className="flex flex-col sm:[contain:size]" aria-labelledby="tape-title">
+        <header className="flex items-baseline justify-between px-5 pt-5 pb-3">
+          <h2 id="tape-title" className="text-sm font-semibold">
+            Tape
+          </h2>
           {tape.length > 0 && (
-            <button type="button" className="tape-clear" onClick={() => setTape([])}>
+            <button
+              type="button"
+              className="-mx-1 -my-0.5 cursor-pointer px-1 py-0.5 text-[0.8125rem] text-ink-soft underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-ink"
+              onClick={() => setTape([])}
+            >
               Clear tape
             </button>
           )}
         </header>
         {tape.length === 0 ? (
-          <p className="empty">Every answer from the calculator service is printed here, errors included.</p>
+          <p className="max-w-[30ch] px-5 pb-5 text-sm leading-normal text-ink-soft sm:pb-0">
+            Every answer from the calculator service is printed here, errors included.
+          </p>
         ) : (
-          <div className="tape-scroll">
-            <ol>
+          // column-reverse keeps the scroll pinned to the newest line, like paper leaving the printer
+          <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto px-5 pb-4 max-sm:max-h-56">
+            <ol className="font-mono text-sm tabular-nums">
               {tape.map((t, i) => (
-                <li key={i} className={"error" in t ? "err" : t.result < 0 ? "neg" : undefined}>
-                  <span className="expr">{t.text}</span>
-                  <span className="res">{"error" in t ? t.error : `= ${formatNumber(t.result)}`}</span>
+                <li key={i} className="flex items-baseline justify-between gap-3 py-1.5">
+                  <span className="text-ink-soft wrap-anywhere">{t.text}</span>
+                  <span
+                    className={`text-right wrap-anywhere ${"error" in t ? "font-sans text-red" : t.result < 0 ? "text-red" : ""}`}
+                  >
+                    {"error" in t ? t.error : `= ${formatNumber(t.result)}`}
+                  </span>
                 </li>
               ))}
             </ol>

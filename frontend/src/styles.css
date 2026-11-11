@@ -1,288 +1,35 @@
+@import "tailwindcss";
+
 /* Paper tape: white sheet, black ink, red ink for errors and negatives (as on
-   an adding machine), hairline rules instead of shadows. */
-:root {
-  color-scheme: light;
-  --desk: #eceeed;
-  --paper: #ffffff;
-  --ink: #161818;
-  --ink-soft: #5b6161; /* 6.3:1 on paper */
-  --red: #b3261e; /* 6.5:1 on paper */
-  --rule: #d4d8d7;
-  --key-fn: #f3f4f4;
-  --key-hover: #e8ebea;
-  --key-down: #dde1e0;
-  --eq-hover: #303535;
-  --radius: 4px;
-  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+   an adding machine), hairline rules instead of shadows. The default palette is
+   cleared so only these colors exist. */
+@theme {
+  --color-*: initial;
+  --color-desk: #eceeed;
+  --color-paper: #ffffff;
+  --color-ink: #161818;
+  --color-ink-soft: #5b6161; /* 6.3:1 on paper */
+  --color-ink-hover: #303535;
+  --color-red: #b3261e; /* 6.5:1 on paper */
+  --color-rule: #d4d8d7;
+  --color-shade: #f3f4f4;
+  --color-shade-hover: #e8ebea;
+  --color-shade-down: #dde1e0;
+
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --text-display: 2.75rem; /* main display */
+  --text-display--line-height: 1.1;
+  --text-display-long: 1.75rem; /* main display, long numbers */
+  --text-display-long--line-height: 1.1;
+  --text-digit: 1.375rem; /* digit keys */
+  --text-glyph: 1.625rem; /* operator keys */
+  --text-label: 1.0625rem; /* function keys */
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 24px 16px;
-  background: var(--desk);
-  color: var(--ink);
-  font-family: var(--sans);
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.sheet {
-  display: grid;
-  grid-template-columns: 22rem 17rem;
-  background: var(--paper);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-/* Display */
-
-.calculator {
-  border-right: 1px solid var(--rule);
-}
-
-.display {
-  padding: 24px 20px 16px;
-  text-align: right;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.line {
-  min-height: 1.25rem;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.value {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  min-height: 3.5rem;
-  font-size: 2.75rem;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
-}
-
-.value.long {
-  font-size: 1.75rem;
-}
-
-.value.error {
-  display: block;
-  padding-top: 0.75rem;
-  font-family: var(--sans);
-  font-size: 1.125rem;
-  line-height: 1.3;
-  letter-spacing: 0;
-  color: var(--red);
-}
-
-.value.error::first-letter {
-  text-transform: uppercase;
-}
-
-/* Keypad: a ruled grid, the gaps are the hairlines. */
-
-.keypad {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: 3.75rem;
-  gap: 1px;
-  background: var(--rule);
-  border-top: 1px solid var(--rule);
-}
-
-.key {
-  border: 0;
-  border-radius: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font: 400 1.375rem/1 var(--mono);
-  cursor: pointer;
-  transition: background-color 100ms ease-out;
-}
-
-.key.fn {
-  background: var(--key-fn);
-  font-size: 1.0625rem;
-}
-
-.key.op {
-  font-size: 1.625rem;
-}
-
-.key.eq {
-  grid-row: span 2;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 1.625rem;
-}
-
-.key.wide {
-  grid-column: span 2;
-}
-
-@media (hover: hover) {
-  .key:hover {
-    background: var(--key-hover);
-  }
-  .key.eq:hover {
-    background: var(--eq-hover);
-  }
-}
-
-.key:active {
-  background: var(--key-down);
-}
-
-.key:focus-visible,
-.tape-clear:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: -4px;
-}
-
-.key.eq:focus-visible {
-  outline-color: var(--paper);
-}
-
-/* Tape */
-
-.tape {
-  display: flex;
-  flex-direction: column;
-  contain: size; /* the calculator sets the sheet's height; the tape scrolls within it */
-}
-
-.tape header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 20px 20px 12px;
-}
-
-.tape h2 {
-  margin: 0;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.tape-clear {
-  padding: 2px 4px;
-  margin: -2px -4px;
-  border: 0;
-  background: none;
-  color: var(--ink-soft);
-  font: inherit;
-  font-size: 0.8125rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.tape-clear:hover {
-  color: var(--ink);
-}
-
-.tape .empty {
-  margin: 0;
-  padding: 0 20px;
-  max-width: 30ch;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  color: var(--ink-soft);
-}
-
-/* column-reverse keeps the scroll pinned to the newest line, like paper leaving the printer */
-.tape-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column-reverse;
-  padding: 0 20px 16px;
-}
-
-.tape ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-family: var(--mono);
-  font-size: 0.875rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.tape li {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 5px 0;
-}
-
-.tape .expr {
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
-}
-
-.tape .res {
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.tape .neg .res,
-.tape .err .res {
-  color: var(--red);
-}
-
-.tape .err .res {
-  font-family: var(--sans);
-}
-
-/* Phones: tape folds under the keypad. */
-@media (max-width: 40rem) {
-  body {
-    place-items: start stretch;
-  }
-  .sheet {
-    grid-template-columns: 1fr;
-  }
-  .calculator {
-    border-right: 0;
-    border-bottom: 1px solid var(--rule);
-  }
-  .keypad {
-    grid-auto-rows: 3.5rem;
-  }
-  .tape {
-    contain: none;
-  }
-  .tape-scroll {
-    max-height: 14rem;
-  }
-  .tape .empty {
-    padding-bottom: 20px;
+@layer base {
+  :root {
+    color-scheme: light;
   }
 }

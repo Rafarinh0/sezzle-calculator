@@ -45,8 +45,8 @@ describe("App", () => {
     render(<App compute={local} />)
     await user.keyboard("1/0{Enter}")
     expect(value()).toHaveTextContent("cannot divide by zero")
-    expect(value()).toHaveClass("error")
     expect(tape().getByText("1 ÷ 0")).toBeInTheDocument()
+    expect(tape().getByText("cannot divide by zero")).toBeInTheDocument()
   })
 
   it("clears the tape without touching the display", async () => {

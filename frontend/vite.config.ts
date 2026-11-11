@@ -1,8 +1,9 @@
+import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     // In development the Go service runs separately; same-origin in Docker, so no CORS either way.
     proxy: { "/api": process.env.API_URL ?? "http://localhost:8080" },
