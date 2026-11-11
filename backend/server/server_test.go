@@ -41,7 +41,8 @@ func TestCalculateEndpoint(t *testing.T) {
 		{"number out of float64 range", "/api/add", `{"operands":[1e400,1]}`, 400, ""},
 		{"unknown field", "/api/add", `{"operands":[1,2],"a":1}`, 400, ""},
 		{"trailing data", "/api/add", `{"operands":[1,2]}{}`, 400, ""},
-		{"body too large", "/api/add", `{"operands":[1,2]}` + strings.Repeat(" ", 2048), 400, ""},
+		// Padding sits inside the value, so decoding must read past the 1 KB limit.
+		{"body too large", "/api/add", `{"operands":[1,` + strings.Repeat(" ", 2048) + `2]}`, 400, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
