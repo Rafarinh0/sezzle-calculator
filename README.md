@@ -1,5 +1,7 @@
 # Calculator
 
+[![CI](https://github.com/Rafarinh0/sezzle-calculator/actions/workflows/ci.yml/badge.svg)](https://github.com/Rafarinh0/sezzle-calculator/actions/workflows/ci.yml)
+
 A React + TypeScript calculator backed by a Go REST service. The frontend does no arithmetic: every
 operation is a `POST` to the Go API, and each answer (or error) is printed on a tape next to the keypad.
 
@@ -59,6 +61,15 @@ Current numbers:
 `main.go` and `main.tsx` only wire things together and aren't unit tested. For an HTML Go
 report: `go test -coverprofile=cover.out ./... && go tool cover -html=cover.out`.
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push to `main` and every
+pull request, in three jobs:
+- **Backend:** `gofmt`, `go vet`, and the tests with the race detector, on the minimum Go version
+  `go.mod` declares.
+- **Frontend:** `npm ci`, the type check and production build, and the tests with coverage.
+- **Docker:** builds the image, then smoke-tests the running container (page, a result, a 422).
+
+Both coverage reports are uploaded as build artifacts.
+
 ## API
 
 One route: `POST /api/{operation}` with a JSON body `{"operands": [...]}`.
@@ -114,8 +125,9 @@ frontend/src/
   calculator.ts      state machine: press(state, key, compute) -> new state + tape entry
   api.ts             fetch client for the Go API
   App.tsx            keypad, keyboard shortcuts, display, tape
-  styles.css         design tokens and layout
+  styles.css         Tailwind theme: colors, fonts, type sizes
 Dockerfile           node build -> go build -> distroless image
+.github/workflows/   CI: backend, frontend and Docker jobs
 ```
 
 ## Design decisions
@@ -157,7 +169,15 @@ Go binary serves the built frontend. Either way there's no CORS to configure.
 **UI.** A calculator is a tool you operate, so there's no landing-page chrome. Results are the
 content. The look follows an adding machine's paper tape: white sheet, black ink, red ink only for
 errors and negative results, hairline rules instead of shadows, monospace tabular digits so columns
-line up. The `=` key is the only filled key. Accessibility:
+line up. The `=` key is the only filled key.
+
+Styling is Tailwind v4. The paper-tape colors, fonts and type sizes live in the `@theme` block in
+`styles.css`, and Tailwind's default color palette is cleared. Only the project's own colors exist,
+so a stray stock class like `bg-violet-600` doesn't compile. Each key kind (digit, function,
+operator, equals) gets one complete class string instead of a base plus overrides, because Tailwind
+picks between conflicting classes by CSS order, not by the order they're written.
+
+Accessibility:
 - Full keyboard support (digits, `+ - * / ^ %`, `r` for √, `F9` for ±, Enter, Backspace, Esc).
   Shortcuts are exposed through `aria-keyshortcuts` and tooltips.
 - Named buttons; the display is an `<output>`, so screen readers announce results.
@@ -165,10 +185,13 @@ line up. The `=` key is the only filled key. Accessibility:
 - On phones the tape folds under the keypad.
 
 **Dependencies.** The backend uses the standard library only. The frontend's only runtime
-dependency is React; Vite, Vitest and Testing Library are dev-only.
+dependency is React. Tailwind, Vite, Vitest and Testing Library are build or test tools only.
+TanStack Query was considered and left out: it's built for caching and refetching server data, and a
+calculator has nothing to cache. Each key is a one-off request, and the hard part (applying keys in
+order while a request is in flight) is a small queue it wouldn't replace.
 
-**Left out on purpose:** dark mode, persisting the tape, auth or rate limiting, linting config
-(TypeScript `strict` plus `go vet` and `gofmt` are the checks). All are small to add if needed.
+**Left out on purpose:** dark mode, persisting the tape, auth or rate limiting, and an ESLint config
+(CI runs `gofmt`, `go vet` and TypeScript's strict mode instead). All are small to add if needed.
 
 ## AI tooling
 
