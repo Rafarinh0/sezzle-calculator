@@ -1,0 +1,7 @@
+node_modules/
+frontend/dist/
+frontend/coverage/
+backend/calculator
+backend/*.exe
+*.out
+.claude/
