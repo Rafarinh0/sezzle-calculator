@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod # tests against the minimum version go.mod declares
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race -coverprofile=coverage.out ./...
+      - run: go tool cover -func=coverage.out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build # tsc --noEmit + vite build
+      - run: npm run coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t calculator .
+      - name: Smoke test the container
+        run: |
+          docker run -d --rm --name calculator -p 8080:8080 calculator
+          for i in $(seq 1 20); do curl -fs localhost:8080/ > /dev/null && break; sleep 0.5; done
+          curl -fs localhost:8080/ | grep -q '<div id="root">'
+          curl -fs -X POST localhost:8080/api/add -d '{"operands":[0.1,0.2]}' | grep -qx '{"result":0.3}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8080/api/divide -d '{"operands":[1,0]}')" = 422
+          docker stop calculator
