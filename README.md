@@ -63,8 +63,8 @@ report: `go test -coverprofile=cover.out ./... && go tool cover -html=cover.out`
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push to `main` and every
 pull request, in three jobs:
-- **Backend:** `gofmt`, `go vet`, and the tests with the race detector, on the minimum Go version
-  `go.mod` declares.
+- **Backend:** `gofmt`, `go vet`, and the tests with the race detector, on both the minimum Go
+  version `go.mod` declares and the latest release (the one the Docker image builds with).
 - **Frontend:** `npm ci`, the type check and production build, and the tests with coverage.
 - **Docker:** builds the image, then smoke-tests the running container (page, a result, a 422).
 
@@ -89,7 +89,7 @@ Success is `200 {"result": n}`. Errors are `{"error": "message"}` with:
 | Status | When |
 |---|---|
 | 400 | Malformed body: not JSON, unknown fields, `null` or non-number operands, wrong operand count, trailing data, body over 1 KB |
-| 404 | Unknown operation (the message lists the supported ones) |
+| 404 | Unknown operation (the message lists the supported ones), or any other path under `/api` |
 | 405 | Method other than POST |
 | 422 | Valid input with no finite real answer: division by zero, square root of a negative, `(-8)^0.5`, overflow |
 
@@ -161,8 +161,11 @@ Other behaviors:
 - √ comes before its number, as on Google's calculator. Pressing it shows `√` and waits; the root is
   calculated when the number is used (by `=`, an operator or `%`). So `√ 9 =` is 3, and `2 + √ 9 =`
   is 5, with `√9 = 3` and `2 + 3 = 5` as two lines on the tape. A number typed right before √
-  multiplies, so `9 √ 4 =` is 18. Backspace on a bare `√` takes it back. Unlike Google's, √ covers
-  only the next number rather than opening a parenthesis, since there are no parenthesis keys.
+  multiplies, so `9 √ 4 =` is 18; so does an operand computed by `%`. ± before or after √ negates
+  the whole root (`± √ 9 =` is −3), since the root of a negative has no answer. Backspace on a bare
+  `√` takes it back. Unlike Google's, √ covers only the next number rather than opening a
+  parenthesis, since there are no parenthesis keys.
+- Right after an error, a digit replaces the operand that failed, and backspace can edit it instead.
 
 **Keys are queued, not dropped.** Keys are applied in order. One pressed while the API is
 answering waits for that answer. An early version dropped those keys; testing in the browser showed
@@ -184,7 +187,10 @@ picks between conflicting classes by CSS order, not by the order they're written
 
 Accessibility:
 - Full keyboard support (digits, `+ - * / ^ %`, `r` for √, `F9` for ±, Enter, Backspace, Esc).
-  Shortcuts are exposed through `aria-keyshortcuts` and tooltips.
+  `Y` also means power, because `^` is a dead key on many layouts (ABNT2, US-International,
+  French), and keys typed with AltGr work. Shortcuts are exposed through `aria-keyshortcuts` and
+  tooltips.
+- Requests time out after 10 seconds, so a stuck API call can't freeze the keypad.
 - Named buttons; the display is an `<output>`, so screen readers announce results.
 - Visible focus, and text contrast of at least 6:1.
 - On phones the tape folds under the keypad.
