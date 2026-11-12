@@ -43,6 +43,10 @@ func TestCalculateEndpoint(t *testing.T) {
 		{"trailing data", "/api/add", `{"operands":[1,2]}{}`, 400, ""},
 		// Padding sits inside the value, so decoding must read past the 1 KB limit.
 		{"body too large", "/api/add", `{"operands":[1,` + strings.Repeat(" ", 2048) + `2]}`, 400, ""},
+		// After the object: rejected on every Go version, though the object itself decodes fine.
+		{"whitespace past the size limit", "/api/add", `{"operands":[1,2]}` + strings.Repeat(" ", 2048), 400,
+			`{"error":"invalid request body: http: request body too large"}`},
+		{"trailing data past the size limit", "/api/add", `{"operands":[1,2]}` + strings.Repeat(" ", 1100) + `x`, 400, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,16 +90,49 @@ func TestOnlyPostIsAllowed(t *testing.T) {
 	}
 }
 
+func TestOtherAPIPathsGetJSON404(t *testing.T) {
+	for _, dir := range []string{"", t.TempDir()} {
+		for _, path := range []string{"/api/", "/api/add/extra"} {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			rec := httptest.NewRecorder()
+			New(dir).ServeHTTP(rec, req)
+			body := strings.TrimSpace(rec.Body.String())
+			if rec.Code != http.StatusNotFound || body != `{"error":"not found: use POST /api/{operation}"}` {
+				t.Errorf("POST %s (static %q) = %d %s, want 404 JSON", path, dir, rec.Code, body)
+			}
+		}
+	}
+}
+
 func TestServesFrontend(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>calc</h1>"), 0o644); err != nil {
-		t.Fatal(err)
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	write("index.html", "<h1>calc</h1>")
+	write("assets/app.js", "app()")
 	h := New(dir)
 
-	code, body := do(t, h, http.MethodGet, "/", "")
-	if code != 200 || body != "<h1>calc</h1>" {
+	if code, body := do(t, h, http.MethodGet, "/", ""); code != 200 || body != "<h1>calc</h1>" {
 		t.Errorf("GET / = %d %q, want 200 index.html", code, body)
+	}
+	if code, body := do(t, h, http.MethodGet, "/assets/app.js", ""); code != 200 || body != "app()" {
+		t.Errorf("GET /assets/app.js = %d %q, want 200", code, body)
+	}
+	if code, _ := do(t, h, http.MethodGet, "/assets/", ""); code != http.StatusNotFound {
+		t.Errorf("GET /assets/ = %d, want 404 (no directory listing)", code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/index.html", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET, HEAD" {
+		t.Errorf("POST /index.html = %d, Allow %q; want 405, GET, HEAD", rec.Code, rec.Header().Get("Allow"))
 	}
 	if code, _ := do(t, h, http.MethodPost, "/api/add", `{"operands":[1,1]}`); code != 200 {
 		t.Errorf("API next to static files: status %d, want 200", code)

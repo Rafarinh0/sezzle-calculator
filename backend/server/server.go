@@ -4,7 +4,9 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 
 	"calculator/calc"
 )
@@ -30,15 +32,34 @@ type failure struct {
 func New(staticDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/{operation}", calculate)
-	// Other methods get a JSON 405 here; otherwise GET would fall through to the file server's 404.
+	// Everything else under /api gets a JSON error too, never the file server's HTML or the mux's text.
 	mux.HandleFunc("/api/{operation}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Allow", http.MethodPost)
 		writeJSON(w, http.StatusMethodNotAllowed, failure{"method not allowed: use POST"})
 	})
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusNotFound, failure{"not found: use POST /api/{operation}"})
+	})
 	if staticDir != "" {
-		mux.Handle("/", http.FileServer(http.Dir(staticDir))) // no method: "GET /" would conflict with the fallback above
+		mux.Handle("/", static(staticDir)) // no method in the pattern: "GET /" would conflict with "/api/{operation}"
 	}
 	return mux
+}
+
+// static serves the built frontend: GET and HEAD only, and no directory listings.
+func static(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method != http.MethodGet && r.Method != http.MethodHead:
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		case r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/"):
+			http.NotFound(w, r)
+		default:
+			files.ServeHTTP(w, r)
+		}
+	})
 }
 
 func calculate(w http.ResponseWriter, r *http.Request) {
@@ -49,8 +70,15 @@ func calculate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, failure{"invalid request body: " + err.Error()})
 		return
 	}
-	if dec.More() {
-		writeJSON(w, http.StatusBadRequest, failure{"invalid request body: unexpected data after JSON object"})
+	// Only whitespace may follow the object. Token (unlike More) reports read errors,
+	// so data hidden past the size limit is rejected too.
+	if _, err := dec.Token(); err != io.EOF {
+		msg := "unexpected data after JSON object"
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			msg = err.Error()
+		}
+		writeJSON(w, http.StatusBadRequest, failure{"invalid request body: " + msg})
 		return
 	}
 

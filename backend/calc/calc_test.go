@@ -33,6 +33,8 @@ func TestCalculate(t *testing.T) {
 		{"percentage", []float64{10, 50}, 5},
 		{"percentage", []float64{25, 1}, 0.25},
 		{"percentage", []float64{-20, 80}, -16},
+		{"percentage", []float64{1e307, 200}, 2e307},                 // the product overflows; the result doesn't
+		{"multiply", []float64{math.MaxFloat64, 1}, math.MaxFloat64}, // rounding to 15 digits would overflow
 	}
 	for _, tt := range tests {
 		got, err := Calculate(tt.op, tt.operands)

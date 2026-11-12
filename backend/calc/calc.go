@@ -58,7 +58,12 @@ var operations = map[string]operation{
 		return math.Sqrt(x[0]), nil
 	}},
 	// percentage(a, b) is "a percent of b": percentage(10, 50) = 5.
-	"percentage": {2, func(x []float64) (float64, error) { return x[0] * x[1] / 100, nil }},
+	"percentage": {2, func(x []float64) (float64, error) {
+		if p := x[0] * x[1] / 100; !math.IsInf(p, 0) {
+			return p, nil // multiplying first keeps whole-number cases exact
+		}
+		return x[0] / 100 * x[1], nil // the product overflowed; dividing first may still fit
+	}},
 }
 
 // Operations lists the supported operation names in alphabetical order.
@@ -96,7 +101,10 @@ func Calculate(name string, operands []float64) (float64, error) {
 // ponytail: float64 with display rounding; switch to math/big or a decimal
 // type if the calculator ever needs exact decimal arithmetic (money).
 func round(x float64) float64 {
-	r, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'g', 15, 64), 64)
+	r, err := strconv.ParseFloat(strconv.FormatFloat(x, 'g', 15, 64), 64)
+	if err != nil {
+		return x // rounding pushed a value near MaxFloat64 out of range; it was finite, so keep it
+	}
 	if r == 0 {
 		return 0
 	}
