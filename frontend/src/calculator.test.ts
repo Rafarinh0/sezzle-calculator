@@ -23,7 +23,7 @@ async function calc(input: string, compute: Compute = local) {
   for (const ch of input) {
     const step = await press(state, TOKENS[ch] ?? (ch as Key), compute)
     state = step.state
-    if (step.record) tape.push(step.record)
+    tape.push(...step.records)
   }
   return { state, tape, display: displayValue(state), line: state.line }
 }
@@ -117,24 +117,98 @@ describe("calculations", () => {
   })
 })
 
-describe("square root and percent", () => {
-  it("takes the square root of the display", async () => {
-    const { display, line, tape } = await calc("9r")
+describe("square root", () => {
+  it("shows √ and waits for the number after it", async () => {
+    const compute = vi.fn(local)
+    const { display, state } = await calc("r9", compute)
+    expect(display).toBe("√9")
+    expect(state.root).toBe(true)
+    expect(compute).not.toHaveBeenCalled() // evaluated only when the number is used
+  })
+
+  it("evaluates on =", async () => {
+    const compute = vi.fn(local)
+    const { display, line, tape } = await calc("r9=", compute)
+    expect(compute).toHaveBeenCalledExactlyOnceWith("sqrt", [9])
     expect(display).toBe("3")
     expect(line).toBe("√9 =")
     expect(tape).toEqual([{ text: "√9", result: 3 }])
   })
 
-  it("uses a square root as the right operand", async () => {
-    const { display, tape } = await calc("16+9r=")
+  it("works as the right operand, with one tape line per API call", async () => {
+    const { display, line, tape } = await calc("16+r9=")
     expect(display).toBe("19")
-    expect(tape.map((t) => t.text)).toEqual(["√9", "16 + 3"])
+    expect(line).toBe("16 + 3 =")
+    expect(tape).toEqual([
+      { text: "√9", result: 3 },
+      { text: "16 + 3", result: 19 },
+    ])
   })
 
-  it("applies the square root to the left operand right after an operator", async () => {
-    expect((await calc("16+r=")).display).toBe("20")
+  it("evaluates before the next operator", async () => {
+    const { display, line } = await calc("r16+")
+    expect(line).toBe("4 +")
+    expect(display).toBe("4")
+    expect((await calc("r16+1=")).display).toBe("5")
   })
 
+  it("keeps the expression line while waiting", async () => {
+    const { display, line } = await calc("16+r")
+    expect(line).toBe("16 +")
+    expect(display).toBe("√")
+  })
+
+  it("multiplies when a typed number comes right before it, like 9√4", async () => {
+    const { display, tape } = await calc("9r4=")
+    expect(display).toBe("18")
+    expect(tape.map((t) => t.text)).toEqual(["√4", "9 × 2"])
+  })
+
+  it("starts a new calculation after a result", async () => {
+    const { display, line } = await calc("2+2=r9=")
+    expect(display).toBe("3")
+    expect(line).toBe("√9 =")
+  })
+
+  it("starts fresh on the initial 0 instead of multiplying by it", async () => {
+    expect((await calc("0r9=")).display).toBe("3")
+  })
+
+  it("ignores =, operators and % until a number follows √", async () => {
+    const compute = vi.fn(local)
+    const { display, state } = await calc("r=+%", compute)
+    expect(display).toBe("√")
+    expect(state.root).toBe(true)
+    expect(compute).not.toHaveBeenCalled()
+  })
+
+  it("ignores a second √", async () => {
+    expect((await calc("rr9=")).display).toBe("3")
+  })
+
+  it("accepts decimals", async () => {
+    expect((await calc("r.")).display).toBe("√0.")
+    expect((await calc("r.25=")).display).toBe("0.5")
+  })
+
+  it("backspace edits the number, then takes the √ back", async () => {
+    expect((await calc("r94<")).display).toBe("√9")
+    expect((await calc("r9<")).display).toBe("√")
+    const undone = await calc("5+r<")
+    expect(undone.state.root).toBe(false)
+    expect(undone.display).toBe("5")
+    expect(undone.line).toBe("5 +")
+    expect((await calc("r<")).display).toBe("0")
+  })
+
+  it("feeds a percent", async () => {
+    const { display, tape } = await calc("50+r100%=")
+    expect(display).toBe("55")
+    expect(tape.map((t) => t.text)).toEqual(["√100", "10% of 50", "50 + 5"])
+  })
+})
+
+describe("percent", () => {
   it("adds a percentage of the left operand for + and −", async () => {
     const compute = vi.fn(local)
     const { display, tape } = await calc("50+10%=", compute)
@@ -171,14 +245,25 @@ describe("errors", () => {
     expect(state.pending).toEqual({ a: 1, op: "divide" })
   })
 
-  it("reports a negative square root", async () => {
-    const { state, display } = await calc("4nr")
-    expect(state.error).toMatch(/negative/)
-    expect(display).toBe("-4")
+  it("reports a negative square root and lets you retype the number under it", async () => {
+    const failed = await calc("10+rn4=")
+    expect(failed.state.error).toMatch(/negative/)
+    expect(failed.display).toBe("√-4")
+    expect(failed.line).toBe("10 +")
+    expect(failed.tape).toEqual([{ text: "√-4", error: "cannot take the square root of a negative number" }])
+
+    const fixed = await calc("10+rn4=9=")
+    expect(fixed.display).toBe("13")
+  })
+
+  it("does not start the √ when the multiplication before it fails", async () => {
+    const { state } = await calc("1/0r")
+    expect(state.error).toBe("cannot divide by zero")
+    expect(state.root).toBe(false)
   })
 
   it("clears the error on the next key", async () => {
-    expect((await calc("4nr<")).state.error).toBeNull()
+    expect((await calc("rn4=<")).state.error).toBeNull()
   })
 
   it("handles compute rejecting with a non-Error", async () => {
@@ -187,11 +272,12 @@ describe("errors", () => {
     expect(state.pending).toEqual({ a: 1, op: "add" })
   })
 
-  it("keeps an empty entry empty when a unary op fails right after an operator", async () => {
-    const { state } = await calc("4n+r")
-    expect(state.error).toMatch(/negative/)
+  it("keeps an empty entry empty when % fails right after an operator", async () => {
+    const failing: Compute = (op, x) => (op === "percentage" ? Promise.reject(new Error("offline")) : local(op, x))
+    const { state } = await calc("4+%", failing)
+    expect(state.error).toBe("offline")
     expect(state.entry).toBe("")
-    expect((await calc("4n+r9=")).display).toBe("5")
+    expect((await calc("4+%2=", failing)).display).toBe("6")
   })
 })
 

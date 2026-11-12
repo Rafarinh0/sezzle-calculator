@@ -65,10 +65,10 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
     (key: Key) => {
       queue.current = queue.current
         .then(async () => {
-          const { state: next, record } = await press(stateRef.current, key, compute)
+          const { state: next, records } = await press(stateRef.current, key, compute)
           stateRef.current = next
           setState(next)
-          if (record) setTape((t) => [...t, record])
+          if (records.length > 0) setTape((t) => [...t, ...records])
         })
         .catch(console.error) // press() reports API failures itself; this only guards the queue
     },
@@ -149,10 +149,11 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
           <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto px-5 pb-4 max-sm:max-h-56">
             <ol className="font-mono text-sm tabular-nums">
               {tape.map((t, i) => (
-                <li key={i} className="flex items-baseline justify-between gap-3 py-1.5">
+                // flex-wrap: a long error moves under its expression instead of squeezing it
+                <li key={i} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5">
                   <span className="text-ink-soft wrap-anywhere">{t.text}</span>
                   <span
-                    className={`text-right wrap-anywhere ${"error" in t ? "font-sans text-red" : t.result < 0 ? "text-red" : ""}`}
+                    className={`ml-auto text-right wrap-anywhere ${"error" in t ? "font-sans text-red" : t.result < 0 ? "text-red" : ""}`}
                   >
                     {"error" in t ? t.error : `= ${formatNumber(t.result)}`}
                   </span>
