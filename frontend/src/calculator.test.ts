@@ -122,7 +122,7 @@ describe("square root", () => {
     const compute = vi.fn(local)
     const { display, state } = await calc("r9", compute)
     expect(display).toBe("√9")
-    expect(state.root).toBe(true)
+    expect(state.root).toBe("√")
     expect(compute).not.toHaveBeenCalled() // evaluated only when the number is used
   })
 
@@ -178,7 +178,7 @@ describe("square root", () => {
     const compute = vi.fn(local)
     const { display, state } = await calc("r=+%", compute)
     expect(display).toBe("√")
-    expect(state.root).toBe(true)
+    expect(state.root).toBe("√")
     expect(compute).not.toHaveBeenCalled()
   })
 
@@ -195,7 +195,7 @@ describe("square root", () => {
     expect((await calc("r94<")).display).toBe("√9")
     expect((await calc("r9<")).display).toBe("√")
     const undone = await calc("5+r<")
-    expect(undone.state.root).toBe(false)
+    expect(undone.state.root).toBe("")
     expect(undone.display).toBe("5")
     expect(undone.line).toBe("5 +")
     expect((await calc("r<")).display).toBe("0")
@@ -205,6 +205,46 @@ describe("square root", () => {
     const { display, tape } = await calc("50+r100%=")
     expect(display).toBe("55")
     expect(tape.map((t) => t.text)).toEqual(["√100", "10% of 50", "50 + 5"])
+  })
+
+  it("is negated by ± typed before it", async () => {
+    const { display, line } = await calc("nr9=")
+    expect(display).toBe("-3")
+    expect(line).toBe("-√9 =")
+    const after = await calc("10+nr9=")
+    expect(after.display).toBe("7")
+    expect(after.tape.map((t) => t.text)).toEqual(["√9", "10 + -3"])
+  })
+
+  it("is negated by ± pressed under it, instead of asking for the root of a negative", async () => {
+    expect((await calc("r9n")).display).toBe("-√9")
+    expect((await calc("r9nn")).display).toBe("√9")
+    expect((await calc("r9n=")).display).toBe("-3")
+  })
+
+  it("backspace on a bare −√ goes back to the minus sign", async () => {
+    expect((await calc("nr<")).display).toBe("-0")
+    expect((await calc("nr<5=")).display).toBe("-5")
+  })
+
+  it("multiplies a % result before it, like a typed number", async () => {
+    const { display, tape } = await calc("50+10%r4=")
+    expect(display).toBe("110") // (50 + 5) × √4, left to right
+    expect(tape.map((t) => t.text)).toEqual(["10% of 50", "50 + 5", "√4", "55 × 2"])
+  })
+
+  it("replaces an operand that just failed instead of multiplying it", async () => {
+    const { display, tape } = await calc("10/0=r4=")
+    expect(display).toBe("5")
+    expect(tape.map((t) => t.text)).toEqual(["10 ÷ 0", "√4", "10 ÷ 2"])
+  })
+
+  it("starts fresh after backspacing the operand away", async () => {
+    const cleared = await calc("12*5<")
+    expect(cleared.state.entry).toBe("")
+    expect(cleared.display).toBe("12")
+    expect(cleared.line).toBe("12 ×")
+    expect((await calc("12*5<r4=")).display).toBe("24")
   })
 })
 
@@ -245,25 +285,43 @@ describe("errors", () => {
     expect(state.pending).toEqual({ a: 1, op: "divide" })
   })
 
-  it("reports a negative square root and lets you retype the number under it", async () => {
-    const failed = await calc("10+rn4=")
-    expect(failed.state.error).toMatch(/negative/)
-    expect(failed.display).toBe("√-4")
+  it("keeps the √ after a failed call so the number under it can be retyped", async () => {
+    const sqrtOffline: Compute = (op, x) => (op === "sqrt" && x[0] === 4 ? Promise.reject(new Error("offline")) : local(op, x))
+    const failed = await calc("10+r4=", sqrtOffline)
+    expect(failed.state.error).toBe("offline")
+    expect(failed.display).toBe("√4")
     expect(failed.line).toBe("10 +")
-    expect(failed.tape).toEqual([{ text: "√-4", error: "cannot take the square root of a negative number" }])
+    expect(failed.tape).toEqual([{ text: "√4", error: "offline" }])
 
-    const fixed = await calc("10+rn4=9=")
-    expect(fixed.display).toBe("13")
+    expect((await calc("10+r4=9=", sqrtOffline)).display).toBe("13")
   })
 
   it("does not start the √ when the multiplication before it fails", async () => {
     const { state } = await calc("1/0r")
     expect(state.error).toBe("cannot divide by zero")
-    expect(state.root).toBe(false)
+    expect(state.root).toBe("")
   })
 
   it("clears the error on the next key", async () => {
-    expect((await calc("rn4=<")).state.error).toBeNull()
+    expect((await calc("1/0=<")).state.error).toBeNull()
+  })
+
+  it("lets backspace edit an operand that just failed", async () => {
+    const offline: Compute = () => Promise.reject(new Error("offline"))
+    const edited = await calc("10/25=<", offline)
+    expect(edited.display).toBe("2")
+    expect(edited.state.overwrite).toBe(false)
+    // a digit still replaces it outright
+    expect((await calc("10/25=7", offline)).display).toBe("7")
+  })
+
+  it("does not edit a failed computed operand such as 1e-12", async () => {
+    const offline: Compute = (op, x) => (op === "multiply" ? Promise.reject(new Error("offline")) : local(op, x))
+    // 0.0000000001% = 1e-12 becomes the right operand, then × fails
+    const failed = await calc("5*0.0000000001%=", offline)
+    expect(failed.state.entry).toMatch(/e-12$/)
+    const { state } = await calc("5*0.0000000001%=<", offline)
+    expect(state.entry).toBe(failed.state.entry) // slicing "1e-12" would leave "1e-1"
   })
 
   it("handles compute rejecting with a non-Error", async () => {

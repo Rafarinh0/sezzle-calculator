@@ -45,6 +45,8 @@ describe("App", () => {
     render(<App compute={local} />)
     await user.keyboard("1/0{Enter}")
     expect(value()).toHaveTextContent("cannot divide by zero")
+    expect(value()).toHaveClass("text-red") // error styling, not the big number display
+    expect(value()).not.toHaveClass("text-display")
     expect(tape().getByText("1 ÷ 0")).toBeInTheDocument()
     expect(tape().getByText("cannot divide by zero")).toBeInTheDocument()
   })
@@ -56,6 +58,30 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Clear tape" }))
     expect(tape().queryByText("2 + 2")).not.toBeInTheDocument()
     expect(value()).toHaveTextContent("4")
+  })
+
+  it("keeps the other shortcuts working while Clear tape has focus", async () => {
+    const user = userEvent.setup()
+    render(<App compute={local} />)
+    await user.keyboard("2+2{Enter}")
+    screen.getByRole("button", { name: "Clear tape" }).focus()
+    await user.keyboard("7*6")
+    expect(value()).toHaveTextContent("6")
+    expect(screen.getByTestId("line")).toHaveTextContent("7 ×")
+  })
+
+  it("accepts keys typed with AltGr, which Windows reports as Ctrl+Alt", () => {
+    render(<App compute={local} />)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "7", ctrlKey: true, altKey: true, modifierAltGraph: true }))
+    return vi.waitFor(() => expect(value()).toHaveTextContent("7"))
+  })
+
+  it("has Y as a second shortcut for power, since ^ is a dead key on many layouts", async () => {
+    const user = userEvent.setup()
+    render(<App compute={local} />)
+    await user.keyboard("2y10{Enter}")
+    expect(value()).toHaveTextContent("1,024")
+    expect(screen.getByRole("button", { name: "Power" })).toHaveAttribute("aria-keyshortcuts", "^ Y")
   })
 
   it("lets Enter activate other buttons instead of pressing =", async () => {

@@ -3,7 +3,8 @@ import { calculate } from "./api"
 import { type Compute, type Key, type TapeEntry, displayValue, formatNumber, initialState, press } from "./calculator"
 
 type Kind = "digit" | "fn" | "op" | "eq" | "wide"
-type KeySpec = { key: Key; label: string; name?: string; shortcut: string; kind?: Kind }
+/** `alt` is a second shortcut, for keyboard layouts where the first is hard to type. */
+type KeySpec = { key: Key; label: string; name?: string; shortcut: string; alt?: string; kind?: Kind }
 
 // Layout order of the 4-column keypad; "=" spans two rows and "0" two columns.
 const KEYS: KeySpec[] = [
@@ -12,7 +13,8 @@ const KEYS: KeySpec[] = [
   { key: "percent", label: "%", name: "Percent", shortcut: "%", kind: "fn" },
   { key: "divide", label: "÷", name: "Divide", shortcut: "/", kind: "op" },
   { key: "sqrt", label: "√", name: "Square root", shortcut: "R", kind: "fn" },
-  { key: "power", label: "xʸ", name: "Power", shortcut: "^", kind: "fn" },
+  // ^ is a dead key on many layouts (ABNT2, US-International, French); Y is Windows Calculator's.
+  { key: "power", label: "xʸ", name: "Power", shortcut: "^", alt: "Y", kind: "fn" },
   { key: "negate", label: "±", name: "Change sign", shortcut: "F9", kind: "fn" },
   { key: "multiply", label: "×", name: "Multiply", shortcut: "*", kind: "op" },
   { key: "7", label: "7", shortcut: "7" },
@@ -33,6 +35,7 @@ const KEYS: KeySpec[] = [
 
 const KEYBOARD: Record<string, Key> = {
   ...Object.fromEntries(KEYS.map((k) => [k.shortcut, k.key])),
+  ...Object.fromEntries(KEYS.flatMap((k) => (k.alt ? [[k.alt, k.key], [k.alt.toLowerCase(), k.key]] : []))),
   r: "sqrt",
   x: "multiply",
   ",": ".",
@@ -78,9 +81,12 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const key = KEYBOARD[e.key]
-      if (!key || e.ctrlKey || e.metaKey || e.altKey) return
-      // Leave other buttons (like "Clear tape") to their native Enter behaviour.
-      if (e.target instanceof Element && e.target.closest("button:not([data-key])")) return
+      // Skip browser/OS shortcuts, but not AltGr: Windows reports it as Ctrl+Alt, and
+      // some layouts need it for keys like / (ABNT2 laptops type it as AltGr+Q).
+      const shortcut = (e.ctrlKey || e.metaKey || e.altKey) && !e.getModifierState("AltGraph")
+      if (!key || shortcut) return
+      // Enter on another button (like "Clear tape") keeps its native click.
+      if (e.key === "Enter" && e.target instanceof Element && e.target.closest("button:not([data-key])")) return
       e.preventDefault() // also stops Enter from re-pressing a focused key
       handle(key)
     }
@@ -114,8 +120,8 @@ export default function App({ compute = calculate }: { compute?: Compute }) {
               data-key
               className={`${KEY_BASE} ${KEY_STYLE[k.kind ?? "digit"]}`}
               aria-label={k.name}
-              aria-keyshortcuts={k.shortcut}
-              title={k.name && `${k.name} (${k.shortcut})`}
+              aria-keyshortcuts={k.alt ? `${k.shortcut} ${k.alt}` : k.shortcut}
+              title={k.name && `${k.name} (${k.alt ? `${k.shortcut} or ${k.alt}` : k.shortcut})`}
               onClick={() => handle(k.key)}
             >
               {k.label}

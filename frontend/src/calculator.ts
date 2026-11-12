@@ -13,10 +13,10 @@ export type State = {
   entry: string
   /** Left operand and operator waiting for the right operand. */
   pending: { a: number; op: BinaryOp } | null
-  /** entry holds a result: the next digit starts a new number instead of appending. */
+  /** entry holds a result, or an operand that just failed: the next digit starts a new number. */
   overwrite: boolean
-  /** √ was pressed: the number typed next is under a square root, evaluated when it's used. */
-  root: boolean
+  /** "√" or "-√" while a square root waits for its number (evaluated when the number is used). */
+  root: "" | "√" | "-√"
   /** Expression shown above the main display, e.g. "12 ×" or "12 × 3 =". */
   line: string
   error: string | null
@@ -38,23 +38,28 @@ export const SYMBOL: Record<BinaryOp, string> = {
   power: "^",
 }
 
-export const initialState: State = { entry: "0", pending: null, overwrite: false, root: false, line: "", error: null }
+export const initialState: State = { entry: "0", pending: null, overwrite: false, root: "", line: "", error: null }
+
+/** A number as typed: optional minus, digits, optional decimal point. Results like "1e-7" don't match. */
+const TYPED = /^-?\d*\.?\d*$/
 
 const done = (state: State): Step => ({ state, records: [] })
 
 export async function press(prev: State, key: Key, compute: Compute): Promise<Step> {
   const s = { ...prev, error: null } // any key dismisses the last error
+  const failed = prev.error !== null // the operand on display is the one that just failed
   switch (key) {
     case ".":
       return done(typeDot(s))
     case "backspace":
-      return done(backspace(s))
+      // A digit replaces a failed operand, but backspace can still edit it.
+      return done(backspace(failed && TYPED.test(s.entry) ? { ...s, overwrite: false } : s))
     case "negate":
       return done(negate(s))
     case "clear":
       return done(initialState)
     case "sqrt":
-      return startRoot(s, compute)
+      return startRoot(s, compute, failed)
     // These use the number on the display, so a pending √ is evaluated first.
     case "equals":
       return withRoot(s, compute, (t) => equals(t, compute))
@@ -89,16 +94,22 @@ function startNumber(s: State, entry: string): State {
   return { ...s, entry, overwrite: false, line: s.pending ? s.line : "" }
 }
 
+// Backspace undoes typing: deleting every digit returns to the state right after
+// the operator or √ (or to the starting 0), and a bare √ is taken back.
 function backspace(s: State): State {
-  if (s.root && s.entry === "") return { ...s, root: false, entry: s.pending ? "" : "0" } // takes the √ back
+  if (s.root && s.entry === "") {
+    return { ...s, root: "", entry: s.root === "-√" ? "-0" : s.pending ? "" : "0" }
+  }
   if (s.overwrite || s.entry === "") return s // results aren't editable
   const entry = s.entry.slice(0, -1)
   const empty = entry === "" || entry === "-"
-  return { ...s, entry: empty ? (s.root ? "" : "0") : entry }
+  return { ...s, entry: empty ? (s.root || s.pending ? "" : "0") : entry }
 }
 
 // Sign change is input editing, like typing a minus sign, so it stays client-side.
+// Under √ it negates the whole root (−√9), since a root of a negative has no answer.
 function negate(s: State): State {
+  if (s.root) return { ...s, root: s.root === "√" ? "-√" : "√" }
   if (s.entry === "") return { ...s, entry: "-0" }
   return { ...s, entry: s.entry.startsWith("-") ? s.entry.slice(1) : "-" + s.entry }
 }
@@ -109,15 +120,20 @@ function current(s: State): number {
 }
 
 // √ waits for the number typed after it, like Google's calculator: √ 9 = 3.
-async function startRoot(s: State, compute: Compute): Promise<Step> {
+async function startRoot(s: State, compute: Compute, failed: boolean): Promise<Step> {
   if (s.root) return done(s) // one √ at a time
-  const fresh = s.entry === "0" && !s.pending // the starting 0, not a typed number
-  if (!s.overwrite && s.entry !== "" && !fresh) {
-    // A number typed right before √ multiplies it: 9 √ 4 = 18.
+  if (s.entry === "-0") return done({ ...startNumber(s, ""), root: "-√" }) // ± then √ is −√x
+  // A number right before √ multiplies it, as in 9 √ 4 = 18: a typed number, or an
+  // operand computed for the pending operation (a % result). The starting 0, a
+  // finished result and an operand that just failed are replaced instead.
+  const multiplies = s.overwrite
+    ? s.pending !== null && !failed
+    : s.entry !== "" && !(s.entry === "0" && !s.pending)
+  if (multiplies) {
     const step = await chooseOperator(s, "multiply", compute)
-    return step.state.error ? step : { ...step, state: { ...step.state, root: true } }
+    return step.state.error ? step : { ...step, state: { ...step.state, root: "√" } }
   }
-  return done({ ...s, entry: "", overwrite: false, root: true, line: s.pending ? s.line : "" })
+  return done({ ...startNumber(s, ""), root: "√" })
 }
 
 // Evaluates a pending √ on the typed number, then runs `then` with the result in its place.
@@ -126,13 +142,10 @@ async function withRoot(s: State, compute: Compute, then: (s: State) => Promise<
   if (!s.root) return then(s)
   if (s.entry === "") return done(s)
   const x = Number(s.entry)
-  const text = `√${formatNumber(x)}`
-  const root = await run(s, text, compute, "sqrt", [x], (r) => ({
-    ...s,
-    root: false,
-    entry: String(r),
-    overwrite: true,
-    line: s.pending ? s.line : `${text} =`,
+  const sign = s.root === "-√" ? -1 : 1
+  const root = await run(s, `√${formatNumber(x)}`, compute, "sqrt", [x], (r) => ({
+    ...showResult(s, sign * r, s.pending, lineAfter(s, `${s.root}${formatNumber(x)}`)),
+    root: "",
   }))
   if (root.state.error) return root
   const next = await then(root.state)
@@ -169,13 +182,16 @@ async function percent(s: State, compute: Compute): Promise<Step> {
   const ofLeft = s.pending && (s.pending.op === "add" || s.pending.op === "subtract")
   const base = ofLeft ? s.pending!.a : 1
   const text = ofLeft ? `${formatNumber(x)}% of ${formatNumber(base)}` : `${formatNumber(x)}%`
-  return run(s, text, compute, "percentage", [x, base], (r) =>
-    showResult(s, r, s.pending, s.pending ? s.line : `${text} =`),
-  )
+  return run(s, text, compute, "percentage", [x, base], (r) => showResult(s, r, s.pending, lineAfter(s, text)))
 }
 
 function showResult(s: State, r: number, pending: State["pending"], line: string): State {
   return { ...s, entry: String(r), pending, overwrite: true, line }
+}
+
+/** The expression line after a unary result: the pending operation if any, else "text =". */
+function lineAfter(s: State, text: string): string {
+  return s.pending ? s.line : `${text} =`
 }
 
 // Calls the API and records the call on the tape. On failure the state is kept
@@ -212,7 +228,7 @@ export function formatNumber(n: number): string {
 
 /** What the main display shows: √ and the number after it, the typed entry, or a formatted result. */
 export function displayValue(s: State): string {
-  if (s.root) return "√" + formatTyped(s.entry)
+  if (s.root) return s.root + formatTyped(s.entry)
   if (s.entry === "" || s.overwrite) return formatNumber(current(s))
   return formatTyped(s.entry)
 }

@@ -22,7 +22,13 @@ describe("calculate", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: '{"operands":[2,3]}',
+      signal: expect.any(AbortSignal),
     })
+  })
+
+  it("gives up on a request that doesn't answer in time", async () => {
+    stubFetch(() => Promise.reject(new DOMException("signal timed out", "TimeoutError")))
+    await expect(calculate("add", [1, 1])).rejects.toThrow("The calculator service didn't answer in time")
   })
 
   it("throws the service's error message", async () => {
