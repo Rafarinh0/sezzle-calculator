@@ -158,6 +158,11 @@ Other behaviors:
 - `12 × =` squares the number.
 - `50 + 10 %` is 55 (with + or −, percent means a percent of the left operand); `50 × 10 %` is 5.
 - An error keeps the expression, so after `10 ÷ 0` you type a new divisor and press `=` again.
+- √ comes before its number, as on Google's calculator. Pressing it shows `√` and waits; the root is
+  calculated when the number is used (by `=`, an operator or `%`). So `√ 9 =` is 3, and `2 + √ 9 =`
+  is 5, with `√9 = 3` and `2 + 3 = 5` as two lines on the tape. A number typed right before √
+  multiplies, so `9 √ 4 =` is 18. Backspace on a bare `√` takes it back. Unlike Google's, √ covers
+  only the next number rather than opening a parenthesis, since there are no parenthesis keys.
 
 **Keys are queued, not dropped.** Keys are applied in order. One pressed while the API is
 answering waits for that answer. An early version dropped those keys; testing in the browser showed
